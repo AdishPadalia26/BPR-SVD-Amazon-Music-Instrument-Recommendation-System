@@ -69,64 +69,20 @@ The web demo allows users to enter an Amazon Customer ID and receive personalize
 
 ## Software Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              CLIENT (Browser)                                │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                         index.html                                    │   │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐     │   │
-│  │  │  Search Bar  │  │ Sample Chips │  │     Results Panel     │     │   │
-│  │  └──────────────┘  └──────────────┘  └────────────────────────┘     │   │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐     │   │
-│  │  │User Profile │  │ Rating Chart │  │ Recommendation Cards  │     │   │
-│  │  │    Card     │  │  (Chart.js) │  │  (Expandable, Stars)  │     │   │
-│  │  └──────────────┘  └──────────────┘  └────────────────────────┘     │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                        │
-│                         HTTP/JSON (REST API)                                │
-└────────────────────────────────────┼────────────────────────────────────────┘
-                                      │
-┌────────────────────────────────────┼────────────────────────────────────────┐
-│                            SERVER (Flask)                                  │
-│                                    │                                        │
-│  ┌─────────────────────────────────┴─────────────────────────────────┐    │
-│  │                           app.py                                    │    │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌───────────┐ │    │
-│  │  │ /api/stats │  │ /api/user   │  │ /api/recomm │  │ /api/samp │ │    │
-│  │  │            │  │             │  │             │  │ le_users  │ │    │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘  └───────────┘ │    │
-│  │                                                                  │    │
-│  │  ┌─────────────────────────────────────────────────────────────┐ │    │
-│  │  │                    Data Layer (Cached in Memory)             │ │    │
-│  │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐  │ │    │
-│  │  │  │ train.csv│  │ test.csv │  │ bpr_recs │  │rating_pred │  │ │    │
-│  │  │  └──────────┘  └──────────┘  └──────────┘  └────────────┘  │ │    │
-│  │  └─────────────────────────────────────────────────────────────┘ │    │
-│  └──────────────────────────────────────────────────────────────────┘    │
-└───────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│                           DATA LAYER                                      │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐    │
-│  │  Musical Instru- │  │   Preprocessed  │  │   BPR/SVD Output CSVs  │    │
-│  │  ments_5.json   │  │   train/test    │  │   (recommendations,    │    │
-│  │  (231K reviews) │  │   splits        │  │    predictions)        │    │
-│  └─────────────────┘  └─────────────────┘  └─────────────────────────┘    │
-└───────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD;
+  A[Client Browser] -->|HTTP/JSON Request| B[Flask Server API];
+  B -->|Queries SVD/BPR Models| C[In-Memory Data Layer];
+  C -->|Preprocessed CSV/JSON| D[Raw Dataset];
 ```
 
 ### Data Flow
 
-```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  JSON Raw    │ ──▶ │  Preprocess  │ ──▶ │    Train     │ ──▶ │   Results    │
-│    Data      │     │   (step1)    │     │   (step2/3)  │     │   (demo)     │
-└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
-     │                    │                    │                    │
-     ▼                    ▼                    ▼                    ▼
-  231,392            219,156           SVD + BPR           Web Demo
-   reviews           ratings           models               Flask app
+```mermaid
+graph LR;
+  A[JSON Raw Data] --> B[Preprocess];
+  B --> C[Train BPR/SVD Models];
+  C --> D[Flask Web Demo];
 ```
 
 ---
@@ -177,26 +133,10 @@ argmax ∏ σ(x_ui - x_uj) · exp(-λ(‖p_u‖² + ‖q_i‖² + ‖q_j‖²))
 
 This project combines both:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    HYBRID RECOMMENDER                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│   Step 1: SVD for Rating Prediction                         │
-│   ─────────────────────────────────                       │
-│   • Use Bias-SVD predicted ratings                          │
-│   • Provides numerical confidence (1-5 scale)                │
-│   • Shown as star ratings on recommendation cards            │
-│                                                             │
-│   Step 2: BPR for Ranking                                   │
-│   ─────────────────────────────                             │
-│   • Use BPR scores to rank items                            │
-│   • Top-10 by BPR score = recommended items                 │
-│   • Fallback: Rank-based scaling for missing ratings         │
-│                                                             │
-│   Result: Items ranked by BPR, rated by SVD                 │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD;
+  S1[Step 1: SVD for Rating Prediction] -->|Generates 1-5 Scale| R[Final Result: Items ranked by BPR, rated by SVD];
+  S2[Step 2: BPR for Ranking] -->|Generates Top-10 Ranking| R;
 ```
 
 ---
@@ -335,39 +275,39 @@ http://localhost:5001
 ### Demo Interface Guide
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ [Logo] RecSys Demo    Musical Instruments · BPR + Bias-SVD  MAE ││
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│               Discover Your Perfect Instrument                  │
+┌────────────────────────────────────────────────────────────────┐
+│ [Logo] RecSys Demo    Musical Instruments · BPR + Bias-SVD  MAE │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│               Discover Your Perfect Instrument                 │
 │        AI-powered recommendations using Bayesian               │
-│               Personalized Ranking                              │
-│                                                                 │
+│               Personalized Ranking                             │
+│                                                                │
 │         ┌───────────────────────────────────────┐              │
 │         │  Enter Customer ID...             🔍   │              │
 │         └───────────────────────────────────────┘              │
-│                                                                 │
+│                                                                │
 │           Try these:  [A100S1JQ...] [AT1TVEC...]               │
-│                        [A1K91RAC...] [A1431CD3...]            │
-│                                                                 │
-├─────────────────────────────────────────────────────────────────┤
-│                     RESULTS (after search)                      │
+│                        [A1K91RAC...] [A1431CD3...]             │
+│                                                                │
+├────────────────────────────────────────────────────────────────┤
+│                     RESULTS (after search)                     │
 │ ┌────────────────┐  ┌─────────────────────────────────────────┐│
 │ │ USER PROFILE   │  │  TOP 10 RECOMMENDATIONS         [LIVE] ││
 │ │ ID: A100S1...  │  │                                         ││
-│ │ Ratings: 5     │  │  ┌─────────────────────────────────┐   ││
-│ │ Avg: 4.8       │  │  │ #1  Product Title         ▼   │   ││
-│ │ Since: Oct 2010│  │  │     ★★★★★  5.0                 │   ││
-│ │ Metrics:       │  │  │     Brand · Category · Price    │   ││
-│ │ Precision: 0.1│  │  │     Description (expanded)      │   ││
-│ │ Recall: 0.5    │  │  └─────────────────────────────────┘   ││
-│ │ NDCG: 0.613   │  │  ┌─────────────────────────────────┐   ││
-│ │ Rating Dist:   │  │  │ #2  Another Product       ▼   │   ││
-│ │ [Chart.js]    │  │  │     ★★★★☆  4.8                 │   ││
+│ │ Ratings: 5     │  │  ┌─────────────────────────────────┐    ││
+│ │ Avg: 4.8       │  │  │ #1  Product Title         ▼    │    ││
+│ │ Since: Oct 2010│  │  │     ★★★★★  5.0                 │    ││
+│ │ Metrics:       │  │  │     Brand · Category · Price    │    ││
+│ │ Precision: 0.1 │  │  │     Description (expanded)      │    ││
+│ │ Recall: 0.5    │  │  └─────────────────────────────────┘    ││
+│ │ NDCG: 0.613    │  │  ┌─────────────────────────────────┐    ││
+│ │ Rating Dist:   │  │  │ #2  Another Product       ▼    │    ││
+│ │ [Chart.js]     │  │  │     ★★★★☆  4.8                 │    ││
 │ └────────────────┘  └─────────────────────────────────────────┘│
-├─────────────────────────────────────────────────────────────────┤
-│  MAE: 0.64    RMSE: 0.99    Precision@10: 0.039    NDCG@10: 0.093
-└─────────────────────────────────────────────────────────────────┘
+├────────────────────────────────────────────────────────────────┤
+│  MAE: 0.64    RMSE: 0.99    Precision@10: 0.039    NDCG@10: 0.093│
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ### Sample User IDs
